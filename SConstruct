@@ -161,8 +161,8 @@ def CreateCustomPy(target, source, env):
 
     # Output variables used for compiling.
     custompy.write("# Compiling\n")
-    showvariables([("CC", "gcc"),
-                   ("SHCC", "gcc"),
+    showvariables([("CC", env["CC"]),
+                   ("SHCC", env["CC"]),
                    ("CPPPATH", ["/usr/local/include"]),
                    ("#CPPDEFINES", ["FOO=BAR", "BAZ", "QUUX"]),
                    ("CFLAGS", "-O2 -g -Wall")])
@@ -192,7 +192,7 @@ def CreateCustomPy(target, source, env):
 ###########################################################################
 
 # Define a basic environment to use.
-env = Environment()
+env = Environment(ENV = os.environ)
 
 # Perform a few initial checks.
 malloc_hooks = 0
@@ -319,7 +319,7 @@ if not env.GetOption("clean") and env["SLAVETYPE"] == "mpi":
     config = Configure(env)
     if not config.CheckCHeader("mpi.h"):
         print 'ERROR: mpi.h is required when SLAVETYPE is set to "mpi"'
-        Exit(1)
+        #Exit(1)
     env = config.Finish()
 
 # Map a filename to a custom environment.
@@ -466,4 +466,4 @@ if ("dist" in COMMAND_LINE_TARGETS
 
 # Create a custom.py template if requested.
 custompy = env.Command("custom.py", None, CreateCustomPy)
-env.NoClean(custompy)
+#env.NoClean(custompy)
