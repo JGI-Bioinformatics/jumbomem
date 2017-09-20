@@ -96,7 +96,7 @@ extern void **mspace_independent_comalloc(mspace msp, size_t n_elements, size_t 
 #ifdef JM_MALLOC_HOOKS
 # define MAYBE_STATIC static
 # define MAYBE_CALLER , const void *caller JM_UNUSED
-void (*__malloc_initialize_hook) (void) = jm_initialize_all;
+void (*__MALLOC_HOOK_VOLATILE __malloc_initialize_hook) (void) = jm_initialize_all;
 #else
 # define jm_internal_malloc    malloc
 # define jm_internal_realloc   realloc
