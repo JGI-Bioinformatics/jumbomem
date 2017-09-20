@@ -1,0 +1,183 @@
+                       +---------------------+
+                       | INSTALLING JUMBOMEM |
+                       |                     |
+                       |     Scott Pakin     |
+                       |    pakin@lanl.gov   |
+                       +---------------------+
+
+
+Introduction
+============
+
+JumboMem is slightly tricky to build.  Cluster configurations vary so
+much that JumboMem requires some human intervention to guide its
+configuration decisions.  Unfortunately, that means you're actually
+going to have to read through the rest of this document.
+
+
+Pre-configuration steps
+=======================
+
+JumboMem builds using SCons (http://www.scons.org/) instead of the
+more common Make.  SCons is freely available from
+http://www.scons.org/ and is relatively easy to install, even in a
+nonstandard location (e.g.,your home directory).  You'll also need an
+MPI library to handle the network communication.  JumboMem has been
+tested primarily with Open MPI (http://www.open-mpi.org/).  If you
+don't have administrator access, both SCons and Open MPI can be
+installed in your home directory.
+
+While not recommended, JumboMem can be build manually (i.e., without
+SCons).  See "Alternative: Building JumboMem without SCons" below.
+
+
+Preparing the build process
+===========================
+
+The best way to get started is simply to run "scons".  The build
+probably won't succeed on the first try but will have the side effect
+of producing a custom.py file, which you should customize for your
+system (just like editing Makefile variables).
+
+Important variables to consider editing in custom.py are
+
+   * LIBS, which specifies additional libraries to link with and
+     probably needs to include "mpi" (or "mpich", depending on the MPI
+     library you're using),
+
+   * PREFIX, which specifies the base directory to which to install
+     JumboMem,
+
+   * LAUNCHCMD, which specifies a command to use to launch a parallel
+     program and can include "$nodes" as a placeholder for the number
+     of nodes to use, and
+
+   * RANKVAR, which specifies an environment variable that JumboMem
+     can use to distinguish the rank 0 process from all other
+     processes in a parallel program.
+
+Don't worry about RANKVAR just yet; we'll set that in a moment.
+
+
+Building JumboMem
+=================
+
+Run "scons" to compile and link JumboMem.
+
+You can additionally run "scons --help" to get a list of JumboMem
+configuration options (presented in decreasing order of usefulness).
+Configuration options are specified on the command line in the form
+"key=value" (e.g., "scons PREFIX=/usr").  Running "scons
+--help-options" provides a list of generic SCons options.  In
+particular, note that "scons -c" (or "--clean") is the SCons
+equivalent of "make clean"; it deletes all of the generated files.
+
+
+Alternative: Building JumboMem without SCons
+============================================
+
+If you're adamant about not installing SCons, the following sequence
+of commands should manage to build JumboMem on a typical 64-bit Linux
+system:
+
+    gcc -c -O2 -g -Wall -fPIC -DJM_MALLOC_HOOKS -DJM_DEBUG -DHAVE_GETTID_SYSCALL -DHAVE_SCHED allocate.c faulthandler.c funcoverrides.c initialize.c miscfuncs.c sysinfo.c threadsupport.c pagetable.c pagereplace_nre.c slaves_mpi.c
+    gcc -c -O2 -g -Wall -fPIC -Dmmap=jm_mmap "-DCORRUPTION_ERROR_ACTION(M)=jm_abort(\"Memory corruption detected (external)\")" "-DUSAGE_ERROR_ACTION(M,P)=jm_abort(\"Invalid free() or realloc() of external address %p\", P)" -DUSE_DL_PREFIX=1 -DHAVE_MORECORE=1 -DMORECORE=jm_morecore -DMORECORE_CONTIGUOUS=0 -DMORECORE_CANNOT_TRIM=1 -DHAVE_MMAP=0 -DHAVE_MREMAP=0 -DJM_MALLOC_HOOKS -DJM_DEBUG -DHAVE_GETTID_SYSCALL -DHAVE_SCHED dlmalloc.c
+    gcc -c -O2 -g -Wall -fPIC -Dmmap=jm_mmap "-DCORRUPTION_ERROR_ACTION(M)=jm_abort(\"Memory corruption detected (internal)\")" "-DUSAGE_ERROR_ACTION(M,P)=jm_abort(\"Invalid free() or realloc() of internal address %p\", P)" -DMORECORE_CONTIGUOUS=0 -DONLY_MSPACES=1 -DJM_MALLOC_HOOKS -DJM_DEBUG -DHAVE_GETTID_SYSCALL -DHAVE_SCHED dlmalloc.c -o mspace-malloc.o
+    mpicc -o libjumbomem.so -shared allocate.o dlmalloc.o mspace-malloc.o initialize.o faulthandler.o miscfuncs.o funcoverrides.o sysinfo.o threadsupport.o pagetable.o pagereplace_nre.o slaves_mpi.o -ldl -lpthread
+    mpicc -o findrankvars -O2 -g -Wall findrankvars.c
+
+Then, copy jumbomem.in to jumbomem and edit the definitions of
+JM_VERSION (should be 2.0), JM_RANKVAR (see below), launchtemplate,
+LD_PRELOAD (should be the full path of the libjumbomem.so shared
+object), and, optionally, some of the other JM_* variables.  Move
+jumbomem somewhere in your path and libjumbomem.so to wherever the
+LD_PRELOAD line in the jumbomem script indicates it resides (typically
+a lib directory).
+
+
+Specifying RANKVAR
+==================
+
+The JumboMem launch script (jumbomem) needs to acquire its rank in the
+computation by reading an environment variable.  (In fact, it needs
+only to be able to distinguish rank 0 from all other ranks.)  However,
+every parallel job launcher provides this information through a
+different environment variable.  The JumboMem build process produces
+an MPI program called findrankvars that helps determine what
+environment variable to use.  To run findrankvars, use MPI to launch
+it on a number of nodes (e.g., with "mpirun -np 8 ./findrankvars").
+findrankvars outputs a list of RANKVAR candidates.  Choose one of
+those, assign RANKVAR to it in custom.py, and re-run scons.
+
+
+Installing JumboMem
+===================
+
+Technically, JumboMem does not need to be installed (although PREFIX
+needs to be set to the build directory if it's not).  Installing it,
+however, copies only the files needed to run JumboMem to the target
+directory; it is then safe to delete the build directory.  Run "scons
+install" to install JumboMem files to PREFIX/bin, PREFIX/lib, etc.
+
+
+Testing the installation
+========================
+
+As an initial test, try running /bin/hostname with JumboMem:
+
+    $ jumbomem -np 3 /bin/hostname
+
+The -np option specifies the total number of processes to launch.
+("-np 3" means three processes: one master plus two slaves).  Use a
+larger number if your cluster contains more workstations.
+
+JumboMem needs a few seconds to initialize and calibrate itself but
+should then run /bin/hostname and output the name of one of the
+workstations in your cluster.
+
+Now try running the same thing but increasing the debug level from 1
+to 2:
+
+    $ jumbomem -np 3 --debug=2 /bin/hostname
+
+JumboMem should output a large quantity of status information (with
+/bin/hostname's output buried somewhere within it).  Take note of the
+"Global memory size"; that's the largest amount of memory JumboMem
+will allow a program to access for the given cluster size.
+
+The JumboMem distribution includes a small test program called
+testjm.c.  Compile it however you normally compile C programs (e.g.,
+"cc -o testjm testjm.c").  When running testjm, specify the number of
+gibibytes (2^30 bytes; cf. http://en.wikipedia.org/wiki/Gibibyte) you
+have in your cluster rounded down to the nearest integer, for example:
+
+    $ jumbomem -np 3 ./testjm 7
+
+The output should look something like this:
+
+    Allocating 7516192768 bytes of memory ... done.
+    Writing 1879048192 4-byte words into an array ... done.
+    Summing the array ... done.
+    SUCCESS!
+    Freeing 7516192768 bytes of memory ... done.
+
+For fun, try running the same testjm command without JumboMem on one
+of the workstations in your cluster.  How much faster was the JumboMem
+run than the non-JumboMem run?
+
+
+Final words
+===========
+
+If you got this far, you should be ready to run JumboMem on other
+applications.  Note that JumboMem does not work with programs that
+can't address more than 2^32 bytes of memory. (A disappointingly large
+number of programs use 32-bit integers to store byte offsets into
+large arrays.)
+
+The jumbomem launch script provides a number of options for tweaking
+JumboMem's performance and memory usage.  Run "jumbomem --help" for a
+quick summary or the JumboMem manual page ("man jumbomem") for a more
+thorough description.
+
+Enjoy!

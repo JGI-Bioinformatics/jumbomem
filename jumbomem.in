@@ -1,0 +1,265 @@
+#! /usr/bin/env bash
+
+###################################
+# Wrapper script for JumboMem     #
+# By Scott Pakin <pakin@lanl.gov> #
+###################################
+
+# ----------------------------------------------------------------------
+# Copyright (C) 2010 Los Alamos National Security, LLC
+#
+# This file is part of JumboMem.
+#
+# This material was produced under U.S. Government contract
+# DE-AC52-06NA25396 for Los Alamos National Laboratory (LANL), which is
+# operated by Los Alamos National Security, LLC for the U.S. Department
+# of Energy.  The U.S. Government has rights to use, reproduce, and
+# distribute this software.  NEITHER THE GOVERNMENT NOR LOS ALAMOS
+# NATIONAL SECURITY, LLC MAKES ANY WARRANTY, EXPRESS OR IMPLIED, OR
+# ASSUMES ANY LIABILITY FOR THE USE OF THIS SOFTWARE.  If software is
+# modified to produce derivative works, such modified software should be
+# clearly marked so as not to confuse it with the version available
+# from LANL.
+#
+# Additionally, this program is free software; you can redistribute it
+# and/or modify it under the terms of the GNU General Public License as
+# published by the Free Software Foundation; version 2.0 of the License.
+# Accordingly, this program is distributed in the hope that it will be
+# useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# General Public License for more details.
+# ----------------------------------------------------------------------
+
+# Specify JumboMem's version number.
+JM_VERSION=unknown
+
+# Define a function that expands "k", "m", and "g" suffixes in an integer
+# while preserving the integer's sign (if any).
+function expand_suffix () {
+    if [ `echo $1 | egrep -c '^[-+]?[0-9]+[kmg]$'` -gt 0 ] ; then
+        if [ `echo $1 | cut -c1` = "+" ] ; then
+            sign=+
+            condensed=`echo $1 | cut -c2-`
+        else
+            sign=
+            condensed=$1
+        fi
+        expanded=$(eval "expr $(echo $condensed | sed -e 's/g/ \\\* 1024m/' -e 's/m/ \\\* 1024k/' -e 's/k/ \\\* 1024/')")
+        echo "$sign$expanded"
+    else
+        echo $1
+    fi
+}
+
+# Define a few useful defaults that differ from the shared library's defaults.
+JM_DEBUG=1
+JM_PAGESIZE=262144
+JM_REDUCEMEM=1
+JM_EXPECTED_RANK=0
+JM_RESERVEMEM="1%"
+JM_LOCAL_PAGES="70%"
+JM_RANKVAR=""
+
+# Define some useful local variables.
+progname=`basename $0`
+usagestr="Usage: $progname [--help] [--version] [--nodes=<count>] [--debug=<level>] [--pagesize=<bytes>] [--heartbeat=<seconds>] [--reserve=<bytes>|<percent>%] [--slavemem=<bytes>] [--mastermem=<bytes>] [--pages=<count>|<percent>%] [--rankvar=<variable>] [--baseaddr=[+|-]<bytes>] [--prefetch[=none|next|delta]] [--fast-start] [--async-evict] [--memcopy] [--nre-entries=<count>] [--nre-retries=<count>] [--nru-interval=<milliseconds>] [--true-nru] [--mlock] <command>"
+staticlib=no
+nodes=1
+launchtemplate=""
+
+# Allow the user to set JumboMem environment variables in his
+# ~/.jumbomemrc file.
+if [ -e ~/.jumbomemrc ] ; then
+    . ~/.jumbomemrc
+fi
+
+# Parse the command line.
+skipnext=no
+command=""
+argnum=0
+for opt ; do
+    let argnum++
+    if [ "$skipnext" = yes ] ; then
+        skipnext=no
+        continue
+    fi
+    arg=`expr "x$opt" : 'x[^=]*=\(.*\)'`
+    case $opt in
+        --help)
+            echo $usagestr
+            echo ""
+            echo "Report bugs to pakin@lanl.gov."
+            exit 0
+            ;;
+        --version)
+            echo "JumboMem $JM_VERSION"
+            exit 0
+            ;;
+        --nodes=*)
+            nodes=$arg
+            ;;
+        --debug=*)
+            JM_DEBUG=$arg
+            ;;
+        --pagesize=*)
+            if [ "$arg" = auto ] ; then
+                JM_PAGESIZE=$arg
+            else
+                JM_PAGESIZE=`expand_suffix $arg`
+            fi
+            ;;
+        --heartbeat=*)
+            JM_HEARTBEAT=$arg
+            ;;
+        --reserve=*%)
+            JM_RESERVEMEM=$arg
+            ;;
+        --reserve=*)
+            JM_RESERVEMEM=`expand_suffix $arg`
+            ;;
+        --slavemem=*)
+            JM_SLAVEMEM=`expand_suffix $arg`
+            ;;
+        --mastermem=*)
+            JM_MASTERMEM=`expand_suffix $arg`
+            ;;
+        --pages=*)
+            JM_LOCAL_PAGES=$arg
+            ;;
+        --nre-entries=*)
+            JM_NRE_ENTRIES=$arg
+            ;;
+        --nre-retries=*)
+            JM_NRE_RETRIES=$arg
+            ;;
+        --nru-interval=*)
+            JM_NRU_INTERVAL=$arg
+            ;;
+        --prefetch=*)
+            JM_PREFETCH=$arg
+            ;;
+        --prefetch)
+            JM_PREFETCH=delta
+            ;;
+        --rankvar=*)
+            JM_RANKVAR=$arg
+            ;;
+        --baseaddr=*)
+            JM_BASEADDR=`expand_suffix $arg`
+            ;;
+        -np)
+            nextargnum=$((argnum+1))
+            nodes=${!nextargnum}
+            skipnext=yes
+            ;;
+        --fast-start)
+            JM_REDUCEMEM=0
+            ;;
+        --async-evict)
+            JM_ASYNCEVICT=1
+            ;;
+        --memcopy)
+            JM_MEMCPY=1
+            ;;
+        --true-nru)
+            JM_NRU_RW=0
+            ;;
+        --mlock)
+            JM_MLOCK=1
+            ;;
+        --local-launch)
+            # Internal use only: We're no longer on the head node so
+            # we can finally run the actual application.
+            launchtemplate=
+            ;;
+        --debug | --pagesize | --reserve | --slavemem | --mastermem | \
+        --pages | --nru-interval | --baseaddr )
+            echo "$progname: $opt takes an argument" 1>&2
+            exit 1
+            ;;
+        --* )
+            echo "$progname: Unknown option \"$opt\""
+            exit 1
+            ;;
+    esac
+    command="$opt"
+    case $opt in
+        --* )
+            ;;
+        -np )
+            ;;
+        $nodes )
+            # Assume we just processed -np.
+            ;;
+        * )
+            break
+            ;;
+    esac
+done
+case "$command" in
+    -* )
+        echo $usagestr 1>&2
+        exit 1
+        ;;
+esac
+
+# Export all JumboMem variables except those set to "auto" and except
+# JM_RANKVAR (whose use is internal to the wrapper script).
+if [ "$JM_RANKVAR" ] ; then
+    JM_EXPECTED_RANK=${!JM_RANKVAR:-0}
+fi
+for jmvar in `set | awk -F= '/^JM_/ && !/^JM_RANKVAR/ {print $1}'` ; do
+    if [ "${!jmvar}" != auto ] ; then
+        export $jmvar
+    fi
+done
+
+# If $launchcommand is nonempty then we use $launchcommand to run the
+# script on a different set of nodes.
+if [ "$launchtemplate" ] ; then
+    # Re-launch the script elsewhere.
+    launchcommand=`echo $launchtemplate | sed "s/\\$nodes/$nodes/g"`
+    if [ ${JM_DEBUG:-0} -gt 0 ] ; then
+        echo "JM_DEBUG (jumbomem [`hostname`:$$]): Executing: $launchcommand $0 --local-launch $@"
+    fi
+    exec $launchcommand "$0" --local-launch "$@"
+    exit 1
+fi
+
+# If we're here then $launchcommand is empty.  Hence, the script is
+# already running on the correct set of nodes and we can simply
+# execute the user's command with JumboMem preloaded.
+
+# Ensure the command exists.
+filespec=`which $command`
+if [ -z "$filespec" ] ; then
+    # The command wasn't found: abort.
+    $command
+    exit 1
+fi
+
+# Decide what to do based on the expected rank in the computation
+# (if known).
+if [ "${JM_EXPECTED_RANK:-0}" -gt 0 -a "$staticlib" = "no" ] ; then
+    # Slave processes don't need to load the program executable unless
+    # we built a static library.
+    cmdline=/bin/true
+else
+    # Discard the first part of the command line.
+    while [ "$1" != "$command" ] ; do
+        shift
+    done
+
+    # Check explicitly for scripts starting with a "#! /usr/bin/env"
+    # sequence and try to handle them correctly.
+    cmdline=`head -1 $filespec`
+    cmdline=`expr "$cmdline" : '#![ ]*/usr/bin/env \(.*\)'`
+fi
+
+# Run the specified program with JumboMem preloaded.
+if [ "$staticlib" = "no" ] ; then
+    LD_PRELOAD=
+    export LD_PRELOAD
+fi
+exec $cmdline "$@"
+exit 1
