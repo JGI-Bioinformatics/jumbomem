@@ -1,0 +1,11 @@
+*.o
+*.os
+*.scon*
+custom.py*
+config.log
+findrankvars
+jumbomem
+jumbomem.1
+*.a
+*.so
+mspace-malloc.c
