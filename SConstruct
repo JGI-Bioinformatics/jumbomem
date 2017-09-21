@@ -37,6 +37,14 @@ import SCons.Script.Main
 # Specify the current version of JumboMem.
 jm_version = "2.1"
 
+# Define a basic environment to use.
+env = Environment(ENV = os.environ)
+
+if os.environ.has_key("PREFIX"):
+    env["PREFIX"] = os.environ["PREFIX"]
+if os.environ.has_key("CC"):
+    env["CC"] = os.environ["CC"]
+
 # Define a function to copy the main environment.
 def copy_env():
     "Copy the main environment."
@@ -177,7 +185,7 @@ def CreateCustomPy(target, source, env):
 
     # Output variables used for installing.
     custompy.write("# Installing\n")
-    showvariables([("PREFIX", "/usr/local")])
+    showvariables([("PREFIX", env["PREFIX"])])
     custompy.write("\n")
 
     # Output variables used for running.
@@ -190,9 +198,6 @@ def CreateCustomPy(target, source, env):
     custompy.close()
 
 ###########################################################################
-
-# Define a basic environment to use.
-env = Environment(ENV = os.environ)
 
 # Perform a few initial checks.
 malloc_hooks = 0
@@ -237,7 +242,7 @@ if not env.GetOption("clean"):
 opts = Variables("custom.py")
 opts.Add(PathVariable("PREFIX",
                       "Directory prefix beneath which to install JumboMem",
-                      "/usr/local",
+                      env["PREFIX"],
                       PathVariable.PathAccept))
 opts.Add("LAUNCHCMD",
          'Template for launching a JumboMem job (with "$nodes" automatically replaced)',

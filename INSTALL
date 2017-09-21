@@ -72,6 +72,12 @@ Configuration options are specified on the command line in the form
 particular, note that "scons -c" (or "--clean") is the SCons
 equivalent of "make clean"; it deletes all of the generated files.
 
+The SConstruct file now honors environmental variables so you can 
+override the compiler and prefix with:
+
+CC=/path/to/mpicc scons
+
+
 
 Alternative: Building JumboMem without SCons
 ============================================
